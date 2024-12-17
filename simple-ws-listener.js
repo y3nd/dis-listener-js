@@ -1,4 +1,4 @@
-import dgram from 'dgram';
+import WebSocket from 'ws';
 import {
   DIS6_PduFactory as PduFactory,
   DIS6_EntityType,
@@ -11,24 +11,29 @@ import {
 const pduFactory = new PduFactory();
 const coordConverter = new CoordinateConverter();
 
-const UDP_MULTICAST_IP = '239.1.2.3';
-const UDP_PORT = 62040;
+const WS_HOST = 'localhost';
+const WS_PORT = 9870;
 
-// Create a socket
-const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+// Create a websocket
+const ws = new WebSocket(`ws://${WS_HOST}:${WS_PORT}`, {
+});
 
-// Event when the socket is ready
-socket.on('listening', () => {
-  const address = socket.address();
-  console.log(`Listening for UDP multicast on ${UDP_MULTICAST_IP}:${UDP_PORT}`);
+ws.on('error', (err) => {
+  console.error(`WebSocket error: ${err.message}`);
+  ws.close();
+});
 
-  // Join the multicast group
-  socket.addMembership(UDP_MULTICAST_IP);
+ws.on('open', () => {
+  console.log(`Connected to WebSocket server ${WS_HOST}:${WS_PORT}`);
+});
+
+ws.on('close', () => {
+  console.log('WebSocket connection closed');
 });
 
 // Event when a message is received
-socket.on('message', (msg, rinfo) => {
-  console.log(`Received packet from ${rinfo.address}:${rinfo.port}, Length: ${rinfo.size} bytes`);
+ws.on('message', (msg, isBinary) => {
+  console.log(`Received WS message, length: ${msg.byteLength} bytes`);
 
   // Parse the DIS Entity State PDU (basic parsing for demonstration)
   if (msg.length >= 144) { // Minimum length of Entity State PDU
@@ -77,12 +82,7 @@ socket.on('message', (msg, rinfo) => {
 });
 
 // Event when there's an error
-socket.on('error', (err) => {
+ws.on('error', (err) => {
   console.error(`Socket error: ${err.message}`);
-  socket.close();
-});
-
-// Bind to the port
-socket.bind(UDP_PORT, () => {
-  console.log('Socket bound successfully.');
+  ws.close();
 });
