@@ -1,0 +1,17 @@
+{
+  "type": "module",
+  "dependencies": {
+    "open-dis-js": "file:../open-dis-js"
+  },
+  "name": "dis-listener-js",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A set of DIS listener for nodejs",
+  "main": "simple-listener.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "node simple-listener.js"
+  },
+  "author": "y3n",
+  "license": "ISC"
+}
