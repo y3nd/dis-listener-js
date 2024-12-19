@@ -232,13 +232,13 @@ class DISWSProxy {
     return this.config;
   }
 
-  log(level, message) {
+  log(level, ...messages) {
     // check if verbose logging is enabled
     if(level < this.config.logLevel) {
       return;
     }
 
-    console.log(`${message}`);
+    console.log(`[${new Date().toISOString()}] [${level}]`, ...messages);
   }
 }
 
