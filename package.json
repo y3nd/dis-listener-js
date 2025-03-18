@@ -1,15 +1,20 @@
 {
   "dependencies": {
+    "esbuild": "^0.25.1",
+    "is-in-subnet": "^4.0.1",
     "open-dis-js": "file:../open-dis-js",
-    "ws": "^8.18.0"
+    "ws": "^8.18.1"
   },
   "name": "dis-listener-js",
   "version": "1.0.0",
   "type": "module",
   "description": "A set of DIS listener for nodejs",
-  "main": "simple-listener.js",
+  "main": "dis-listener.js",
   "scripts": {
-    "test": "node simple-listener.js"
+    "test": "node dis-listener.js",
+    "build": "esbuild dis-listener.js --bundle --minify --platform=node --outfile=dist/dis-listener-out.js",
+    "start": "node dis-listener.js",
+    "upgrade": "npx npm-check-updates -u && npm install"
   },
   "author": "y3n",
   "license": "ISC"

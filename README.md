@@ -22,5 +22,10 @@ npm test
 node dis-ws-proxy.js
 ```
 
+# Generate pdf doc
+```sh
+npx md-to-pdf dis-listener.md
+```
+
 # License
-*Proprietary license for now, contact me for license acquisition*
+*Proprietary license for now, contact PROLEXIA for license acquisition*

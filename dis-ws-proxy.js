@@ -1,20 +1,20 @@
-import dgram from 'dgram';
+import dgram from 'node:dgram';
 import {
   DIS6_PduFactory as PduFactory,
-  DIS6_EntityType,
   DIS6_EntityStatePdu,
-  DIS6_SubsurfacePlatformAppearance,
   DIS6_SurfacePlatformAppearance,
+  DIS6_EntityID,
+  InputStream,
   CoordinateConverter
 } from 'open-dis-js';
-
 import { WebSocketServer } from 'ws';
+import { isInSubnet } from 'is-in-subnet';
 
 import packageJson from './package.json' with { type: "json" };
 
 /** 
  * @typedef {Object} DISWSProxyConfig
- * @property {string} [disMulticastAddress] - The DIS multicast IP address to listen on. Default is '239.1.2.3'
+ * @property {string} [disAddress] - The DIS IP address to listen on. Default is '239.1.2.3'
  * @property {number} [disLocalAddress] - The local address to listen on. Default is '0.0.0.0'
  * @property {number} [disPort] - The port to listen on. Default is 62040
  * @property {number} [wsHost] - The host to listen on for WebSocket connections. Default is 'localhost'
@@ -26,10 +26,10 @@ import packageJson from './package.json' with { type: "json" };
 const args = process.argv.slice(2);
 
 // min args length is 2
-if(args.length < 2) {
-  console.log('Usage: node dis-ws-proxy.js <disMulticastAddress> <disPort> [wsHost] [wsPort] [-v]');
+if (args.length < 2) {
+  console.log('Usage: node dis-ws-proxy.js <disAddress> <disPort> [wsHost] [wsPort] [-v]');
   console.log('');
-  console.log('Options:');
+  console.log('Options (only at the end):');
   console.log('  -v  Enable verbose logging');
   console.log('');
   console.log('Example:');
@@ -38,15 +38,22 @@ if(args.length < 2) {
   process.exit(1);
 }
 
-// get multicast address and port from args
-const UDP_MULTICAST_IP = args[0];
-const UDP_PORT = parseInt(args[1]);
+// filter out - flags
+const argsf = args.filter(arg => !arg.startsWith('-'));
+//console.log("argsf", argsf);
+// filter out non - flags
+const argsp = args.filter(arg => arg.startsWith('-'));
+//console.log("argsp", argsp);
 
-const WS_HOST = (!args[2].startsWith('-')) ? args[2] : 'localhost';
-const WS_PORT = (!args[2].startsWith('-')) ? parseInt(args[3]) : 9870;
+// get address and port from args
+const UDP_IP = argsf[0];
+const UDP_PORT = parseInt(argsf[1]);
+
+const WS_HOST = argsf[2] ?? 'localhost';
+const WS_PORT = argsf[3] ? parseInt(args[3]) : 8080;
 
 // check -v flag for verbose logging
-const VERBOSE = args.includes('-v');
+const VERBOSE = argsp.includes('-v');
 
 class DISWSProxy {
   version = packageJson.version;
@@ -68,7 +75,10 @@ class DISWSProxy {
     WARN: 2,
     ERROR: 3
   }
-  
+
+  /** @type {boolean} */
+  isMulticast = false;
+
   /**
    * @param {DISWSProxyConfig} config
    */
@@ -112,8 +122,8 @@ class DISWSProxy {
 
   broadcastToWSClients(msg) {
     // check if ws is running and has clients
-    if(this.ws?.clients.size > 0) {
-      for(const client of this.ws.clients) {
+    if (this.ws?.clients.size > 0) {
+      for (const client of this.ws.clients) {
         client.send(msg);
       }
 
@@ -126,15 +136,19 @@ class DISWSProxy {
 
     this.socket.on('listening', () => {
       const address = this.socket.address();
-      this.log(DISWSProxy.LOG_LEVEL.INFO, `Listening for UDP multicast on ${this.config.disMulticastAddress}:${this.config.disPort}`);
 
-      // Join the multicast group
-      this.socket.addMembership(UDP_MULTICAST_IP);
+      this.log(DISWSProxy.LOG_LEVEL.INFO, `Listening for UDP ${this.isMulticast ? "multicast" : ""} on ${this.config.disAddress}:${this.config.disPort}`);
+
+      // Join the multicast group if needed
+      if (this.isMulticast) {
+        this.log(DISWSProxy.LOG_LEVEL.INFO, `Joining multicast group ${UDP_IP}`);
+        this.socket.addMembership(UDP_IP);
+      }
     });
 
     // Event when a message is received
     this.socket.on('message', (msg, rinfo) => {
-      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `Received packet from ${rinfo.address}:${rinfo.port}, Length: ${rinfo.size} bytes`);
+      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `\n\nReceived packet from ${rinfo.address}:${rinfo.port}, Length: ${rinfo.size} bytes`);
 
       this.parseDISMessage(msg);
     });
@@ -193,25 +207,74 @@ class DISWSProxy {
     // convert entityLocation to lat long
     const pos = this.coordConverter.convertDisToLatLongInDegrees(espdu.entityLocation);
 
-    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `Lat: ${pos.latitude}, Lon: ${pos.longitude}, Alt: ${pos.altitude}`);
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `[${(new Date()).toISOString()}] Received Entity State PDU:`);
+
+    // type
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `type: ${espdu.entityType.kind}, domain: ${espdu.entityType.domain}, country: ${espdu.entityType.country}, category: ${espdu.entityType.category}, subcategory: ${espdu.entityType.subcategory}, specific: ${espdu.entityType.spec}, extra: ${espdu.entityType.extra}`);
+
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `pos: Lat: ${pos.latitude}, Lon: ${pos.longitude}, Alt: ${pos.altitude}`);
+
+    // translated orientation
+    const ort = orientationConverter.calculateHeadingPitchRollFromPsiThetaPhiRadians(espdu.entityOrientation, pos.latitude, pos.longitude);
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `heading: ${ort.heading}, pitch: ${ort.pitch}, roll: ${ort.roll}`);
+
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `heading: ${heading}`);
 
     const marking = espdu.marking.getMarking();
     this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `marking: ${marking}`);
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `id: ${espdu.entityID}`);
 
     // appearance
-    if (espdu.entityType.entityKind === DIS6_EntityType.EntityKind.PLATFORM
-      && espdu.entityType.domain === DIS6_EntityType.Domain.SURFACE) {
-      const appearance = new DIS6_SurfacePlatformAppearance();
-      appearance.fromUInt32(espdu.entityAppearance);
+    const appearance = new DIS6_SurfacePlatformAppearance();
+    appearance.fromUInt32(espdu.entityAppearance);
+    // damage from appearance
+    const damage = appearance.damage;
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `damage: ${damage}`);
 
-      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `SurfacePlatformAppearance:`, appearance);
-    } else if (espdu.entityType.entityKind === DIS6_EntityType.EntityKind.PLATFORM
-      && espdu.entityType.domain === DIS6_EntityType.Domain.SUBSURFACE) {
-      const appearance = new DIS6_SubsurfacePlatformAppearance();
-      appearance.fromUInt32(espdu.entityAppearance);
+    // articulation parameters
+    const aps = espdu.articulationParameters;
 
-      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `SubsurfacePlatformAppearance:`, appearance);
+    this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `Articulation Parameters (count: ${aps.length}):`);
+
+    let i = 0;
+    for (const ap of aps) {
+      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `ap #${i}:`);
+      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `  parameterType: ${ap.parameterType}`);
+      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `  parameterTypeDesignator: ${ap.parameterTypeDesignator}`);
+      this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `  parameterValue: 0x${this.toHex(ap.parameterValue)}`);
+
+      if (ap.parameterType === 1 && ap.parameterTypeDesignator === 0) {
+        // convert parametervalue to EntityID
+        const arrbuf = new Uint8Array(ap.parameterValue).buffer;
+        //console.log(arrbuf);
+        const is = new InputStream(arrbuf);
+        const eid = new DIS6_EntityID();
+        eid.initFromBinary(is);
+        this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `  parameterValue Entity ID decoded:`);
+        this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `    site: ${eid.site}`);
+        this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `    application: ${eid.application}`);
+        this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `    entity: ${eid.entity}`);
+        i++;
+      }
     }
+
+    // if (espdu.entityType.entityKind === DIS6_EntityType.EntityKind.PLATFORM
+    //   && espdu.entityType.domain === DIS6_EntityType.Domain.SURFACE) {
+    //   const appearance = new DIS6_SurfacePlatformAppearance();
+    //   appearance.fromUInt32(espdu.entityAppearance);
+
+    //   this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `SurfacePlatformAppearance:`, appearance);
+    // } else if (espdu.entityType.entityKind === DIS6_EntityType.EntityKind.PLATFORM
+    //   && espdu.entityType.domain === DIS6_EntityType.Domain.SUBSURFACE) {
+    //   const appearance = new DIS6_SubsurfacePlatformAppearance();
+    //   appearance.fromUInt32(espdu.entityAppearance);
+
+    //   this.log(DISWSProxy.LOG_LEVEL.VERBOSE, `SubsurfacePlatformAppearance:`, appearance);
+    // }
+  }
+
+  toHex(buffer) {
+    return Array.prototype.map.call(buffer, x => ('00' + x.toString(16)).slice(-2)).join('');
   }
 
   /**
@@ -219,13 +282,16 @@ class DISWSProxy {
    */
   setConfig(config) {
     this.config = {
-      disMulticastAddress: config.disMulticastAddress ?? '239.1.2.3',
+      disAddress: config.disAddress ?? '239.1.2.3',
       disPort: config.disPort ?? 62040,
       wsHost: config.wsHost ?? 'localhost',
       wsPort: config.wsPort ?? 9870,
       wsPath: config.wsPath ?? '/',
       logLevel: config.logLevel ?? DISWSProxy.LOG_LEVEL.INFO
     };
+
+    // Check if the address is a multicast address (part of 224.0.0.0/4) for IPv4
+    this.isMulticast = isInSubnet(this.config.disAddress, "224.0.0.0/4");
   }
 
   getConfig() {
@@ -234,7 +300,7 @@ class DISWSProxy {
 
   log(level, ...messages) {
     // check if verbose logging is enabled
-    if(level < this.config.logLevel) {
+    if (level < this.config.logLevel) {
       return;
     }
 
@@ -243,7 +309,7 @@ class DISWSProxy {
 }
 
 const proxy = new DISWSProxy({
-  disMulticastAddress: UDP_MULTICAST_IP,
+  disAddress: UDP_IP,
   disPort: UDP_PORT,
   logLevel: VERBOSE ? DISWSProxy.LOG_LEVEL.VERBOSE : DISWSProxy.LOG_LEVEL.INFO,
   wsHost: WS_HOST,
