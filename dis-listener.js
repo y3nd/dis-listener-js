@@ -38,12 +38,13 @@ if (args.length < 2) {
 
   console.log(`Usage: ${isSEA ? "":nodePrefix}${FILENAME} <disAddress> <disPort> [filename] [-v]`);
   console.log('');
-  console.log('disAddress: The DIS IP address to listen on. It can be a multicast address (subnet 224.0.0.0/4).');
+  console.log('disAddress: The DIS IP address to listen on.');
+  console.log('            Unicast, multicast and broadcast IPv4 adresses are allowed.');
   console.log('disPort: The port to listen on.');
   console.log('filename: The output file to write logs to.');
   console.log('');
   console.log('Example:');
-  console.log(`  ${isSEA ? "":nodePrefix}${FILENAME} 239.1.2.3 62040 -v`);
+  console.log(`  ${isSEA ? "":nodePrefix}${FILENAME} 239.1.2.3 62040`);
   console.log('');
   process.exit(1);
 }
@@ -106,6 +107,7 @@ class DISListener {
     // Check if the output file is set
     if (FILE_OUTPUT) {
       this.logStream = createWriteStream(FILE_OUTPUT, { flags: 'a' });
+      this.log(DISListener.LOG_LEVEL.INFO, `Logging to file: ${FILE_OUTPUT}`);
     }
   }
 
@@ -115,7 +117,7 @@ class DISListener {
     this.socket.on('listening', () => {
       const address = this.socket.address();
 
-      this.log(DISListener.LOG_LEVEL.INFO, `Listening for UDP ${this.isMulticast ? "multicast" : ""} on ${this.config.disAddress}:${this.config.disPort}`);
+      this.log(DISListener.LOG_LEVEL.INFO, `Listening for UDP${this.isMulticast ? " multicast" : ""} on ${this.config.disAddress}:${this.config.disPort}`);
 
       // Join the multicast group if needed
       if (this.isMulticast) {
@@ -126,7 +128,7 @@ class DISListener {
 
     // Event when a message is received
     this.socket.on('message', (msg, rinfo) => {
-      console.log(``);
+      this.log(DISListener.LOG_LEVEL.VERBOSE, ``);
       this.log(DISListener.LOG_LEVEL.VERBOSE, `Received datagram from ${rinfo.address}:${rinfo.port}, length: ${rinfo.size} bytes`);
 
       this.parseDISMessage(msg);
@@ -187,7 +189,7 @@ class DISListener {
 
     // translated orientation
     const ort = orc.calculateHeadingPitchRollFromPsiThetaPhiRadians(espdu.entityOrientation, pos.latitude, pos.longitude);
-    this.log(DISListener.LOG_LEVEL.VERBOSE, `heading: ${ort.heading}, pitch: ${ort.pitch}, roll: ${ort.roll}`);
+    this.log(DISListener.LOG_LEVEL.VERBOSE, `heading: ${ort.heading}°, pitch: ${ort.pitch}°, roll: ${ort.roll}°`);
 
     const marking = espdu.marking.getMarking();
     this.log(DISListener.LOG_LEVEL.VERBOSE, `marking: ${marking}`);
@@ -258,7 +260,11 @@ class DISListener {
       return;
     }
 
-    const prefix = `[${new Date().toISOString()}] [${level}]`;
+    let prefix = `[${new Date().toISOString()}]`;
+
+    const enableLevel = false;
+
+    if(enableLevel) prefix += ` [${level}]`;
 
     // log to stdout
     console.log(prefix, ...messages);

@@ -22,6 +22,13 @@ npm test
 node dis-ws-proxy.js
 ```
 
+# [Build SEA for dis-listener.js](./dis-listener.md)
+
+# Generate html doc
+```sh
+marked -i dis-listener.md -o ./dist/dis-listener.html
+```
+
 # Generate pdf doc
 ```sh
 npx md-to-pdf dis-listener.md

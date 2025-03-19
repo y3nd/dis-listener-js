@@ -17,5 +17,5 @@
     "upgrade": "npx npm-check-updates -u && npm install"
   },
   "author": "y3n",
-  "license": "ISC"
+  "license": "Proprietary"
 }
